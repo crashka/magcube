@@ -78,7 +78,10 @@ class ModelBase(CpModel):
         print(f"- Wall time : {self.solver.wall_time:.2f} secs", file=sys.stderr)
 
 class Model0(ModelBase):
-    """Constraints based on domains and combinations (``add_allowed_assignments()``).
+    """Original model attempt with ``IntVar``s for each coordinate representing piece IDs.
+    This solution is inherently flawed, since the ``piece_usage`` constraints are not
+    specified as proper linear constaints (even though the engine does not recognize
+    and/or complain about that).
     """
     blocks: dict[tuple, IntVar]
     piece_usage: list[IntVar]
