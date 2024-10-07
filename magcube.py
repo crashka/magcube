@@ -21,7 +21,8 @@ PosKeyT = tuple[CoordT, int]  # int represents piece ID
 COORDS = [(x, y, z) for x in range(3) for y in range(3) for z in range(3)]
 
 class BaseModel(CpModel):
-    """Abstract base class for local models.
+    """Abstract base class for local models.  Subclasses must implement ``build()`` and
+    ``solution()`` methods (and optionally, ``__init__()``).
     """
     pieces:   list[PieceT]
     at_coord: dict[CoordT, list[int]]  # value: list of piece IDs
@@ -34,12 +35,18 @@ class BaseModel(CpModel):
         super().__init__()
         self.pieces = pieces
         self.at_coord = {coord: [] for coord in COORDS}
-        for p_id, piece in enumerate(pieces):
+        for p_id, piece in enumerate(self.pieces):
             for block_coord in piece:
                 self.at_coord[block_coord].append(p_id)
 
         self.model = CpModel()
         self.solver = None
+
+    @property
+    def npieces(self) -> int:
+        """Number of pieces that the model was instantiated with.
+        """
+        return len(self.pieces)
 
     def build(self) -> Self:
         """Add variables and constraints for the model.  Abstract method--must be
@@ -82,7 +89,7 @@ class ModelA(BaseModel):
     """Constraints based on domains and combinations (``add_allowed_assignments()``).
     """
     piece_pos: dict[PosKeyT, IntVar]
-    
+
     def __init__(self, pieces: list[PieceT]):
         """Constructor takes list of pieces as input.
         """
@@ -93,11 +100,9 @@ class ModelA(BaseModel):
         """Add variables and constraints for the model.  Return ``self``, for method
         chaining.
         """
-        npieces = len(self.pieces)
-
         # Constraint #0 - specify domain for (coord, p_id)
         for coord in COORDS:
-            for p_id in range(npieces):
+            for p_id in range(self.npieces):
                 self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_p{p_id}')
 
         # Constraint #1 - specify all-or-none assignment for all blocks within a piece
@@ -105,42 +110,69 @@ class ModelA(BaseModel):
         for p_id, piece in enumerate(self.pieces):
             p_blocks = [self.piece_pos[block, p_id] for block in piece]
             self.model.add_allowed_assignments(p_blocks, all_or_none)
-    
+
         # Constraint #2 - ensure valid piece-block mapping for all puzzle coordinates
         for coord in COORDS:
             coord_pieces = (self.piece_pos[coord, p_id] for p_id in self.at_coord[coord])
             self.model.add(sum(coord_pieces) == 1)
-    
+
         return self
 
     def solution(self) -> list[int]:
         """Return list of pieces for the solution.
         """
-        npieces = len(self.pieces)
-
         sol_pieces = []
-        for p_id in range(npieces):
+        for p_id in range(self.npieces):
             p_count = sum(self.solver.value(self.piece_pos[coord, p_id]) for coord in COORDS)
             if p_count > 0:
                 assert p_count == 3
                 sol_pieces.append(p_id)
-        
+
         return sol_pieces
 
 class ModelB(BaseModel):
     """Constraints based on propositional logic and reification (``add_bool_and()`` and
     ``only_enforce_if()``).
     """
+    piece_pos:  dict[PosKeyT, IntVar]
+    piece_used: list[IntVar]  # indexed by piece ID
+
+    def __init__(self, pieces: list[PieceT]):
+        """Constructor takes list of pieces as input.
+        """
+        super().__init__(pieces)
+        self.piece_pos = {}
+
     def build(self) -> Self:
         """Add variables and constraints for the model.  Return ``self``, for method
         chaining.
         """
+        # Constraint #0 - specify domain for (coord, p_id) [same as ModelA]
+        for coord in COORDS:
+            for p_id in range(self.npieces):
+                self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_{p_id}')
+
+        # Constraint #1 - specify variables for piece usage, and create associated
+        # constraits for component blocks
+        self.piece_used = [self.model.new_bool_var(f'used_{p_id}') for p_id in range(self.npieces)]
+        for p_id, piece in enumerate(self.pieces):
+            all_blocks = [self.piece_pos[block, p_id] for block in piece]
+            no_blocks = [~self.piece_pos[block, p_id] for block in piece]
+            self.model.add_bool_and(all_blocks).only_enforce_if(self.piece_used[p_id])
+            self.model.add_bool_and(no_blocks).only_enforce_if(~self.piece_used[p_id])
+
+        # Constraint #2 - ensure valid piece-block mapping for all puzzle coordinates
+        # [same as ModelA]
+        for coord in COORDS:
+            coord_pieces = (self.piece_pos[coord, p_id] for p_id in self.at_coord[coord])
+            self.model.add(sum(coord_pieces) == 1)
+
         return self
 
     def solution(self) -> list[int]:
         """Return list of pieces for the solution.
         """
-        return None
+        return [p_id for p_id in range(self.npieces) if self.solver.value(self.piece_used[p_id])]
 
 def build_pieces() -> list:
     """Generate full list of magnetically correct pieces
@@ -195,11 +227,6 @@ def fit_pieces(pieces: list, model_cls: Type = ModelA) -> list | None:
 
     For now, we are stopping after the first solution, though later we may want to explore
     for the number of distinct solutions (barring rotations).
-
-    We model this by creating an integer variable for each subcube (block) in the puzzle,
-    whose value contains a piece number (``range(len(pieces))``).  Contraints are created
-    to ensure that the right number of pieces are selected, and the block values (piece
-    IDs) are compatible with the location of the block.
     """
     model = model_cls(pieces)
     model.build()
@@ -242,7 +269,9 @@ def main() -> int:
         print("\nSolution not found")
         return 1
 
-    print(f"\nSolution: {solution}")
+    print(f"\nSolution (piece: coords):")
+    for p_id in solution:
+        print(f"{p_id:2d}: {[block for block in pieces[p_id]]}")
     return 0
 
 if __name__ == "__main__":
