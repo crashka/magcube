@@ -44,14 +44,15 @@ def render(solution: list[PieceT]) -> None:
     """Create and display interactive 3d rendering of puzzle solution.
     """
     def explode(evt: slider) -> None:
-        """Slider callback: explode pieces away from the origin (0, 0, 0).
+        """Slider callback: explode pieces relative to the origin (0, 0, 0).
         """
+        nonlocal pieces, ref_pos
         wt.text = f"{evt.value:.2f}"
         for idx, piece in enumerate(pieces):
             piece.pos = ref_pos[idx] * evt.value
 
     def key_pressed(evt: event_return) -> None:
-        """Keydown callback: change ``running`` indicator if "q" is pressed.
+        """Keydown callback: change ``running`` indicator if 'q' is pressed.
         """
         nonlocal running
         if evt.key == 'q':
@@ -81,8 +82,8 @@ def render(solution: list[PieceT]) -> None:
 
     while (running):
         rate(30)
-    stop_server()
-    pass
+    stop_server()  # issues a sys.exit() somewhere in its bowels (yuk!)
+    assert False, "NOTREACHED"
 
 ########
 # main #
