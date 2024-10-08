@@ -10,6 +10,8 @@ from os import environ
 
 from ortools.sat.python.cp_model import IntVar, Domain, CpModel, CpSolver, OPTIMAL, FEASIBLE
 
+from render import render
+
 DEBUG = int(environ.get('MAGCUBE_DEBUG') or 0)
 
 CoordT  = tuple[int, ...]     # ints represent individual coordinates
@@ -269,9 +271,14 @@ def main() -> int:
         print("\nSolution not found")
         return 1
 
+    to_render = []
     print(f"\nSolution (piece: coords):")
     for p_id in solution:
-        print(f"{p_id:2d}: {[block for block in pieces[p_id]]}")
+        block_coords = [block for block in pieces[p_id]]
+        to_render.append(block_coords)
+        print(f"{p_id:2d}: {block_coords}")
+    print("\nRendering in 3D...")
+    render(to_render)
     return 0
 
 if __name__ == "__main__":
