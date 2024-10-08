@@ -10,17 +10,28 @@ from os import environ
 
 from ortools.sat.python.cp_model import IntVar, Domain, CpModel, CpSolver, OPTIMAL, FEASIBLE
 
-from render import render
-
 DEBUG = int(environ.get('MAGCUBE_DEBUG') or 0)
 
-CoordT  = tuple[int, ...]     # ints represent individual coordinates
-BlockT  = CoordT
-PieceT  = tuple[BlockT, ...]
-PosKeyT = tuple[CoordT, int]  # int represents piece ID
+# 2D types
+Coord2dT = tuple[int, int]            # (x, y) coordinates
+SquareT  = tuple[Coord2dT, Coord2dT]  # (position, polarity)
+ShapeT   = tuple[SquareT, SquareT, SquareT]
+
+# 3D types
+CoordT   = tuple[int, int, int]   # (x, y, z) coordinates
+BlockT   = tuple[CoordT, CoordT]  # (position, polarity)
+PieceT   = tuple[BlockT, BlockT, BlockT]
+PosKeyT  = tuple[CoordT, int]     # int represents piece ID
 
 # all valid coordinates for the puzzle
 COORDS = [(x, y, z) for x in range(3) for y in range(3) for z in range(3)]
+
+# used as the base of a polarity vector
+GRID_COORDS = [(x, y) for x in range(3) for y in range(3)]
+
+#############
+# BaseModel #
+#############
 
 class BaseModel(CpModel):
     """Abstract base class for local models.  Subclasses must implement ``build()`` and
@@ -38,8 +49,8 @@ class BaseModel(CpModel):
         self.pieces = pieces
         self.at_coord = {coord: [] for coord in COORDS}
         for p_id, piece in enumerate(self.pieces):
-            for block_coord in piece:
-                self.at_coord[block_coord].append(p_id)
+            for blk_pos, blk_pol in piece:
+                self.at_coord[blk_pos].append(p_id)
 
         self.model = CpModel()
         self.solver = None
@@ -87,16 +98,51 @@ class BaseModel(CpModel):
         print(f"- Branches  : {self.solver.num_branches}", file=sys.stderr)
         print(f"- Wall time : {self.solver.wall_time:.2f} secs", file=sys.stderr)
 
+##########
+# ModelA #
+##########
+
 class ModelA(BaseModel):
-    """Constraints based on domains and combinations (``add_allowed_assignments()``).
+    """Constraints based on propositional logic and reification (``add_bool_and()`` and
+    ``only_enforce_if()``).
     """
-    piece_pos: dict[PosKeyT, IntVar]
+    piece_pos:  dict[PosKeyT, IntVar]
+    piece_used: list[IntVar]               # indexed by piece ID
+    xy_pol_pos: dict[Coord2dT, list[int]]  # value: list of piece IDs
+    xy_pol_neg: dict[Coord2dT, list[int]]
+    xz_pol_pos: dict[Coord2dT, list[int]]
+    xz_pol_neg: dict[Coord2dT, list[int]]
+    yz_pol_pos: dict[Coord2dT, list[int]]
+    yz_pol_neg: dict[Coord2dT, list[int]]
 
     def __init__(self, pieces: list[PieceT]):
         """Constructor takes list of pieces as input.
         """
         super().__init__(pieces)
         self.piece_pos = {}
+        self.piece_used = None
+        self.xy_pol_pos = {coord: [] for coord in GRID_COORDS}
+        self.xy_pol_neg = {coord: [] for coord in GRID_COORDS}
+        self.xz_pol_pos = {coord: [] for coord in GRID_COORDS}
+        self.xz_pol_neg = {coord: [] for coord in GRID_COORDS}
+        self.yz_pol_pos = {coord: [] for coord in GRID_COORDS}
+        self.yz_pol_neg = {coord: [] for coord in GRID_COORDS}
+        # record the list of pieces with positive and negative polarities along each
+        # polarity vector
+        for p_id, piece in enumerate(self.pieces):
+            for (x, y, z), (mx, my, mz) in piece:
+                if mz:
+                    self.xy_pol_pos[(x, y)].append(p_id)
+                else:
+                    self.xy_pol_neg[(x, y)].append(p_id)
+                if my:
+                    self.xz_pol_pos[(x, z)].append(p_id)
+                else:
+                    self.xz_pol_neg[(x, z)].append(p_id)
+                if mx:
+                    self.yz_pol_pos[(y, z)].append(p_id)
+                else:
+                    self.yz_pol_neg[(y, z)].append(p_id)
 
     def build(self) -> Self:
         """Add variables and constraints for the model.  Return ``self``, for method
@@ -105,69 +151,48 @@ class ModelA(BaseModel):
         # Constraint #0 - specify domain for (coord, p_id)
         for coord in COORDS:
             for p_id in range(self.npieces):
-                self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_p{p_id}')
-
-        # Constraint #1 - specify all-or-none assignment for all blocks within a piece
-        all_or_none = [[1, 1, 1], [0, 0, 0]]
-        for p_id, piece in enumerate(self.pieces):
-            p_blocks = [self.piece_pos[block, p_id] for block in piece]
-            self.model.add_allowed_assignments(p_blocks, all_or_none)
-
-        # Constraint #2 - ensure valid piece-block mapping for all puzzle coordinates
-        for coord in COORDS:
-            coord_pieces = (self.piece_pos[coord, p_id] for p_id in self.at_coord[coord])
-            self.model.add(sum(coord_pieces) == 1)
-
-        return self
-
-    def solution(self) -> list[int]:
-        """Return list of pieces for the solution.
-        """
-        sol_pieces = []
-        for p_id in range(self.npieces):
-            p_count = sum(self.solver.value(self.piece_pos[coord, p_id]) for coord in COORDS)
-            if p_count > 0:
-                assert p_count == 3
-                sol_pieces.append(p_id)
-
-        return sol_pieces
-
-class ModelB(BaseModel):
-    """Constraints based on propositional logic and reification (``add_bool_and()`` and
-    ``only_enforce_if()``).
-    """
-    piece_pos:  dict[PosKeyT, IntVar]
-    piece_used: list[IntVar]  # indexed by piece ID
-
-    def __init__(self, pieces: list[PieceT]):
-        """Constructor takes list of pieces as input.
-        """
-        super().__init__(pieces)
-        self.piece_pos = {}
-
-    def build(self) -> Self:
-        """Add variables and constraints for the model.  Return ``self``, for method
-        chaining.
-        """
-        # Constraint #0 - specify domain for (coord, p_id) [same as ModelA]
-        for coord in COORDS:
-            for p_id in range(self.npieces):
                 self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_{p_id}')
 
         # Constraint #1 - specify variables for piece usage, and create associated
         # constraits for component blocks
         self.piece_used = [self.model.new_bool_var(f'used_{p_id}') for p_id in range(self.npieces)]
         for p_id, piece in enumerate(self.pieces):
-            all_blocks = [self.piece_pos[block, p_id] for block in piece]
-            no_blocks = [~self.piece_pos[block, p_id] for block in piece]
+            all_blocks = [self.piece_pos[blk_pos, p_id] for blk_pos, blk_pol in piece]
+            no_blocks = [~self.piece_pos[blk_pos, p_id] for blk_pos, blk_pol in piece]
             self.model.add_bool_and(all_blocks).only_enforce_if(self.piece_used[p_id])
             self.model.add_bool_and(no_blocks).only_enforce_if(~self.piece_used[p_id])
 
         # Constraint #2 - ensure valid piece-block mapping for all puzzle coordinates
-        # [same as ModelA]
         for coord in COORDS:
             coord_pieces = (self.piece_pos[coord, p_id] for p_id in self.at_coord[coord])
             self.model.add(sum(coord_pieces) == 1)
+
+        # Constraint #3 - specify variables for all polarity vectors, and ensure that all
+        # pieces are aligned on vectors
+        self.xy_polarity = {(x, y): self.model.new_bool_var(f'xy_pol_{(x, y)}')
+                            for (x, y) in GRID_COORDS}
+        self.xz_polarity = {(x, z): self.model.new_bool_var(f'xz_pol_{(x, z)}')
+                            for (x, z) in GRID_COORDS}
+        self.yz_polarity = {(y, z): self.model.new_bool_var(f'yz_pol_{(y, z)}')
+                            for (y, z) in GRID_COORDS}
+
+        for x, y in GRID_COORDS:
+            xy_pos_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_pos[(x, y)]]
+            xy_neg_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_neg[(x, y)]]
+            self.model.add(sum(xy_pos_pieces) == 3).only_enforce_if(self.xy_polarity[(x, y)])
+            self.model.add(sum(xy_neg_pieces) == 3).only_enforce_if(~self.xy_polarity[(x, y)])
+
+        for x, z in GRID_COORDS:
+            xz_pos_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_pos[(x, z)]]
+            xz_neg_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_neg[(x, z)]]
+            self.model.add(sum(xz_pos_pieces) == 3).only_enforce_if(self.xz_polarity[(x, z)])
+            self.model.add(sum(xz_neg_pieces) == 3).only_enforce_if(~self.xz_polarity[(x, z)])
+
+        for y, z in GRID_COORDS:
+            yz_pos_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_pos[(y, z)]]
+            yz_neg_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_neg[(y, z)]]
+            self.model.add(sum(yz_pos_pieces) == 3).only_enforce_if(self.yz_polarity[(y, z)])
+            self.model.add(sum(yz_neg_pieces) == 3).only_enforce_if(~self.yz_polarity[(y, z)])
 
         return self
 
@@ -176,52 +201,135 @@ class ModelB(BaseModel):
         """
         return [p_id for p_id in range(self.npieces) if self.solver.value(self.piece_used[p_id])]
 
-def build_pieces() -> list:
-    """Generate full list of magnetically correct pieces
+################
+# build_pieces #
+################
+
+ROT_2D = {
+    (0, 0): (0, 1),
+    (0, 1): (1, 1),
+    (1, 1): (1, 0),
+    (1, 0): (0, 0)
+}
+
+REF_SHAPES = 4
+
+def rot_coord(coord: Coord2dT) -> Coord2dT:
+    """Rotate 2D coordinate (in 2x2 space) 90 degrees clockwise.  Works for either
+    position or polarity.
     """
-    xy_shapes = []  # list[tuple[tuple]] (shapes, squares, 2d-coords)
+    return ROT_2D[coord]
+
+def rot_shape(shape: ShapeT) -> ShapeT:
+    """Rotate shape 90 degrees clockwise, both positionally and magnetically.
+    """
+    pos_0, pol_0 = shape[0]
+    pos_1, pol_1 = shape[1]
+    pos_2, pol_2 = shape[2]
+    square_0 = rot_coord(pos_0), rot_coord(pol_0)
+    square_1 = rot_coord(pos_1), rot_coord(pol_1)
+    square_2 = rot_coord(pos_2), rot_coord(pol_2)
+    return square_0, square_1, square_2
+
+def tr_pos(pos: Coord2dT, vec: Coord2dT) -> Coord2dT:
+    """Translate (move) position by specified 2D vector.
+    """
+    x, y = pos
+    dx, dy = vec
+    return x + dx, y + dy
+
+def tr_shape(shape: ShapeT, vec: Coord2dT) -> ShapeT:
+    """Translate (move) shape by specified 2D vector.
+    """
+    pos_0, pol_0 = shape[0]
+    pos_1, pol_1 = shape[1]
+    pos_2, pol_2 = shape[2]
+    square_0 = tr_pos(pos_0, vec), pol_0
+    square_1 = tr_pos(pos_1, vec), pol_1
+    square_2 = tr_pos(pos_2, vec), pol_2
+    return square_0, square_1, square_2
+
+def build_pieces() -> list:
+    """Generate full list of distinct (positionally and magnetically) puzzle pieces.
+
+    Each piece is composed of three blocks, arranged in the shape of an L.  Each block is
+    described by its 3D position (within a 3x3x3 space) plus 3 dimensions of polarity
+    (assumed to be the same for all blocks within a piece--to be verified!).
+
+    For polarity, ``1`` indicates directionally positive polarity for an axis, ``0``
+    indicates directionally negative polarity.
+    """
+    xy_shapes = []  # list[ShapeT]
     xz_shapes = []
     yz_shapes = []
-    xy_pieces = []  # list[tuple[tuple]] (pieces, blocks, 3d-coords)
+    xy_pieces = []  # list[PieceT]
     xz_pieces = []
     yz_pieces = []
 
-    # xy_shapes - type #1
-    centers_1 = (0, 0), (0, 1), (1, 1), (1, 0)
-    for cx, cy in centers_1:
-        rt = cx, cy + 1
-        dn = cx + 1, cy
-        shape = (cx, cy), rt, dn
-        xy_shapes.append(shape)
+    # base everything off of initial reference shape; NOTE that first square is the one in
+    # the middle (important later for setting the origin of the piece when rendering)
+    sq_0 = (0, 0), (1, 0)
+    sq_1 = (1, 0), (1, 0)
+    sq_2 = (0, 1), (1, 0)
+    sh_0 = (sq_0, sq_1, sq_2)
+    xy_shapes.append(sh_0)
 
-    # xy_shapes - type #2
-    centers_2 = (1, 1), (1, 2), (2, 2), (2, 1)
-    for cx, cy in centers_2:
-        lf = cx, cy - 1
-        up = cx - 1, cy
-        shape = (cx, cy), lf, up
-        xy_shapes.append(shape)
+    # create rotations (and validate full cycling)
+    xy_shapes.append(rot_shape(xy_shapes[-1]))
+    xy_shapes.append(rot_shape(xy_shapes[-1]))
+    xy_shapes.append(rot_shape(xy_shapes[-1]))
+    assert len(xy_shapes) == REF_SHAPES
+    assert rot_shape(xy_shapes[-1]) == sh_0
 
-    # xz_shapes
+    # now create translations of the shapes to complete xy_shapes
+    for vec in (1, 0), (1, 1), (0, 1):
+        for shape in xy_shapes[:REF_SHAPES]:
+            xy_shapes.append(tr_shape(shape, vec))
+
+    # xz_shapes and yz_shapes are just copies of xy_shapes (at least in the naive version
+    # of piece generation)
     for shape in xy_shapes:
-        xz_shapes.append(tuple((x, 2 - y) for x, y in shape))
-
-    # yz_shapes
-    for shape in xz_shapes:
-        yz_shapes.append(tuple((2 - x, z) for x, z in shape))
+        xz_shapes.append(tuple(sq for sq in shape))
+        yz_shapes.append(tuple(sq for sq in shape))
 
     # generate pieces from shapes
     for i in range(3):
+        # xy_pieces
         for shape in xy_shapes:
-            xy_pieces.append(tuple((x, y, i) for x, y in shape))
+            xy_pieces.append(tuple(((px, py, i), (mx, my, 1))
+                                   for (px, py), (mx, my) in shape))
 
+        # add flipped xy_pieces--flipping along center block diagonal (so "arm" blocks
+        # swap spots), which basically means reversing all of the polarities
+        for shape in xy_shapes:
+            xy_pieces.append(tuple(((px, py, i), (mx ^ 0x01, my ^ 0x01, 0))
+                                   for (px, py), (mx, my) in shape))
+
+        # xz_pieces
         for shape in xz_shapes:
-            xz_pieces.append(tuple((x, i, z) for x, z in shape))
+            xz_pieces.append(tuple(((px, i, pz), (mx, 0, mz ^ 0x01))
+                                   for (px, pz), (mx, mz) in shape))
 
+        # flipped xz_pieces
+        for shape in xz_shapes:
+            xz_pieces.append(tuple(((px, i, pz), (mx ^ 0x01, 1, mz))
+                                   for (px, pz), (mx, mz) in shape))
+
+        # yz_pieces
         for shape in yz_shapes:
-            yz_pieces.append(tuple((i, y, z) for y, z in shape))
+            xz_pieces.append(tuple(((i, py, pz), (1, my, mz ^ 0x01))
+                                   for (py, pz), (my, mz) in shape))
+
+        # flipped yz_pieces
+        for shape in yz_shapes:
+            xz_pieces.append(tuple(((i, py, pz), (0, my ^ 0x01, mz))
+                                   for (py, pz), (my, mz) in shape))
 
     return xy_pieces + xz_pieces + yz_pieces
+
+##############
+# fit_pieces #
+##############
 
 def fit_pieces(pieces: list, model_cls: Type = ModelA) -> list | None:
     """Return list of pieces that fit the 3x3 cube, or ``None`` if no solution is found.
@@ -274,10 +382,11 @@ def main() -> int:
     to_render = []
     print(f"\nSolution (piece: coords):")
     for p_id in solution:
-        block_coords = [block for block in pieces[p_id]]
-        to_render.append(block_coords)
-        print(f"{p_id:2d}: {block_coords}")
+        blk_coords = [blk_pos for blk_pos, blk_pol in pieces[p_id]]
+        to_render.append(blk_coords)
+        print(f"{p_id:2d}: {blk_coords}")
     print("\nRendering in 3D...")
+    from render import render
     render(to_render)
     return 0
 
