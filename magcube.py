@@ -37,23 +37,49 @@ class BaseModel(CpModel):
     """Abstract base class for local models.  Subclasses must implement ``build()`` and
     ``solution()`` methods (and optionally, ``__init__()``).
     """
-    pieces:   list[PieceT]
-    at_coord: dict[CoordT, list[int]]  # value: list of piece IDs
-    model:    CpModel
-    solver:   CpSolver
+    model:      CpModel
+    solver:     CpSolver
+    pieces:     list[PieceT]
+    at_coord:   dict[CoordT, list[int]]    # value: list of piece IDs
+    xy_pol_pos: dict[Coord2dT, list[int]]  # value: list of piece IDs
+    xy_pol_neg: dict[Coord2dT, list[int]]
+    xz_pol_pos: dict[Coord2dT, list[int]]
+    xz_pol_neg: dict[Coord2dT, list[int]]
+    yz_pol_pos: dict[Coord2dT, list[int]]
+    yz_pol_neg: dict[Coord2dT, list[int]]
 
     def __init__(self, pieces: list[PieceT]):
         """Constructor takes list of pieces as input.
         """
         super().__init__()
-        self.pieces = pieces
-        self.at_coord = {coord: [] for coord in COORDS}
-        for p_id, piece in enumerate(self.pieces):
-            for blk_pos, blk_pol in piece:
-                self.at_coord[blk_pos].append(p_id)
+        self.model      = None
+        self.solver     = None
+        self.pieces     = pieces
+        self.at_coord   = {coord: [] for coord in COORDS}
+        self.xy_pol_pos = {coord2d: [] for coord2d in GRID_COORDS}
+        self.xy_pol_neg = {coord2d: [] for coord2d in GRID_COORDS}
+        self.xz_pol_pos = {coord2d: [] for coord2d in GRID_COORDS}
+        self.xz_pol_neg = {coord2d: [] for coord2d in GRID_COORDS}
+        self.yz_pol_pos = {coord2d: [] for coord2d in GRID_COORDS}
+        self.yz_pol_neg = {coord2d: [] for coord2d in GRID_COORDS}
 
-        self.model = CpModel()
-        self.solver = None
+        for p_id, piece in enumerate(self.pieces):
+            for (px, py, pz), (mx, my, mz) in piece:
+                self.at_coord[(px, py, pz)].append(p_id)
+                # record the list of pieces with positive and negative polarities along
+                # each polarity vector
+                if mz:
+                    self.xy_pol_pos[(px, py)].append(p_id)
+                else:
+                    self.xy_pol_neg[(px, py)].append(p_id)
+                if my:
+                    self.xz_pol_pos[(px, pz)].append(p_id)
+                else:
+                    self.xz_pol_neg[(px, pz)].append(p_id)
+                if mx:
+                    self.yz_pol_pos[(py, pz)].append(p_id)
+                else:
+                    self.yz_pol_neg[(py, pz)].append(p_id)
 
     @property
     def npieces(self) -> int:
@@ -106,49 +132,30 @@ class ModelA(BaseModel):
     """Constraints based on propositional logic and reification (``add_bool_and()`` and
     ``only_enforce_if()``).
     """
-    piece_pos:  dict[PosKeyT, IntVar]
-    piece_used: list[IntVar]               # indexed by piece ID
-    xy_pol_pos: dict[Coord2dT, list[int]]  # value: list of piece IDs
-    xy_pol_neg: dict[Coord2dT, list[int]]
-    xz_pol_pos: dict[Coord2dT, list[int]]
-    xz_pol_neg: dict[Coord2dT, list[int]]
-    yz_pol_pos: dict[Coord2dT, list[int]]
-    yz_pol_neg: dict[Coord2dT, list[int]]
+    piece_pos:   dict[PosKeyT, IntVar]
+    piece_used:  list[IntVar]  # indexed by piece ID
+    xy_polarity: dict[Coord2dT, IntVar]
+    xz_polarity: dict[Coord2dT, IntVar]
+    yz_polarity: dict[Coord2dT, IntVar]
 
     def __init__(self, pieces: list[PieceT]):
         """Constructor takes list of pieces as input.
         """
         super().__init__(pieces)
-        self.piece_pos = {}
-        self.piece_used = None
-        self.xy_pol_pos = {(x, y): [] for (x, y) in GRID_COORDS}
-        self.xy_pol_neg = {(x, y): [] for (x, y) in GRID_COORDS}
-        self.xz_pol_pos = {(x, z): [] for (x, z) in GRID_COORDS}
-        self.xz_pol_neg = {(x, z): [] for (x, z) in GRID_COORDS}
-        self.yz_pol_pos = {(y, z): [] for (y, z) in GRID_COORDS}
-        self.yz_pol_neg = {(y, z): [] for (y, z) in GRID_COORDS}
-        # record the list of pieces with positive and negative polarities along each
-        # polarity vector
-        for p_id, piece in enumerate(self.pieces):
-            for (x, y, z), (mx, my, mz) in piece:
-                if mz:
-                    self.xy_pol_pos[(x, y)].append(p_id)
-                else:
-                    self.xy_pol_neg[(x, y)].append(p_id)
-                if my:
-                    self.xz_pol_pos[(x, z)].append(p_id)
-                else:
-                    self.xz_pol_neg[(x, z)].append(p_id)
-                if mx:
-                    self.yz_pol_pos[(y, z)].append(p_id)
-                else:
-                    self.yz_pol_neg[(y, z)].append(p_id)
+        self.piece_pos   = None
+        self.piece_used  = None
+        self.xy_polarity = None
+        self.xz_polarity = None
+        self.yz_polarity = None
 
     def build(self) -> Self:
         """Add variables and constraints for the model.  Return ``self``, for method
         chaining.
         """
+        self.model = CpModel()
+
         # Constraint #0 - specify domain for (coord, p_id)
+        self.piece_pos = {}
         for coord in COORDS:
             for p_id in range(self.npieces):
                 self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_{p_id}')
@@ -169,30 +176,28 @@ class ModelA(BaseModel):
 
         # Constraint #3 - specify variables for all polarity vectors, and ensure that all
         # pieces are aligned on vectors
-        self.xy_polarity = {(x, y): self.model.new_bool_var(f'xy_pol_{(x, y)}')
-                            for (x, y) in GRID_COORDS}
-        self.xz_polarity = {(x, z): self.model.new_bool_var(f'xz_pol_{(x, z)}')
-                            for (x, z) in GRID_COORDS}
-        self.yz_polarity = {(y, z): self.model.new_bool_var(f'yz_pol_{(y, z)}')
-                            for (y, z) in GRID_COORDS}
+        self.xy_polarity = {coord2d: self.model.new_bool_var(f'xy_pol_{coord2d}')
+                            for coord2d in GRID_COORDS}
+        self.xz_polarity = {coord2d: self.model.new_bool_var(f'xz_pol_{coord2d}')
+                            for coord2d in GRID_COORDS}
+        self.yz_polarity = {coord2d: self.model.new_bool_var(f'yz_pol_{coord2d}')
+                            for coord2d in GRID_COORDS}
 
-        for x, y in GRID_COORDS:
-            xy_pos_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_pos[(x, y)]]
-            xy_neg_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_neg[(x, y)]]
-            self.model.add(sum(xy_pos_pieces) == 3).only_enforce_if(self.xy_polarity[(x, y)])
-            self.model.add(sum(xy_neg_pieces) == 3).only_enforce_if(~self.xy_polarity[(x, y)])
+        for coord2d in GRID_COORDS:
+            xy_pos_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_pos[coord2d]]
+            xy_neg_pieces = [self.piece_used[p_id] for p_id in self.xy_pol_neg[coord2d]]
+            self.model.add(sum(xy_pos_pieces) == 3).only_enforce_if(self.xy_polarity[coord2d])
+            self.model.add(sum(xy_neg_pieces) == 3).only_enforce_if(~self.xy_polarity[coord2d])
 
-        for x, z in GRID_COORDS:
-            xz_pos_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_pos[(x, z)]]
-            xz_neg_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_neg[(x, z)]]
-            self.model.add(sum(xz_pos_pieces) == 3).only_enforce_if(self.xz_polarity[(x, z)])
-            self.model.add(sum(xz_neg_pieces) == 3).only_enforce_if(~self.xz_polarity[(x, z)])
+            xz_pos_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_pos[coord2d]]
+            xz_neg_pieces = [self.piece_used[p_id] for p_id in self.xz_pol_neg[coord2d]]
+            self.model.add(sum(xz_pos_pieces) == 3).only_enforce_if(self.xz_polarity[coord2d])
+            self.model.add(sum(xz_neg_pieces) == 3).only_enforce_if(~self.xz_polarity[coord2d])
 
-        for y, z in GRID_COORDS:
-            yz_pos_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_pos[(y, z)]]
-            yz_neg_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_neg[(y, z)]]
-            self.model.add(sum(yz_pos_pieces) == 3).only_enforce_if(self.yz_polarity[(y, z)])
-            self.model.add(sum(yz_neg_pieces) == 3).only_enforce_if(~self.yz_polarity[(y, z)])
+            yz_pos_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_pos[coord2d]]
+            yz_neg_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_neg[coord2d]]
+            self.model.add(sum(yz_pos_pieces) == 3).only_enforce_if(self.yz_polarity[coord2d])
+            self.model.add(sum(yz_neg_pieces) == 3).only_enforce_if(~self.yz_polarity[coord2d])
 
         #self.model.add_assumption(self.piece_used[0])
         return self
@@ -215,22 +220,16 @@ ROT_2D = {
 
 REF_SHAPES = 4
 
-def rot_coord(coord: Coord2dT) -> Coord2dT:
+def rot_coord(coord2d: Coord2dT) -> Coord2dT:
     """Rotate 2D coordinate (in 2x2 space) 90 degrees clockwise.  Works for either
     position or polarity.
     """
-    return ROT_2D[coord]
+    return ROT_2D[coord2d]
 
 def rot_shape(shape: ShapeT) -> ShapeT:
     """Rotate shape 90 degrees clockwise, both positionally and magnetically.
     """
-    pos_0, pol_0 = shape[0]
-    pos_1, pol_1 = shape[1]
-    pos_2, pol_2 = shape[2]
-    square_0 = rot_coord(pos_0), rot_coord(pol_0)
-    square_1 = rot_coord(pos_1), rot_coord(pol_1)
-    square_2 = rot_coord(pos_2), rot_coord(pol_2)
-    return square_0, square_1, square_2
+    return tuple((rot_coord(pos), rot_coord(pol)) for pos, pol in shape)
 
 def tr_pos(pos: Coord2dT, vec: Coord2dT) -> Coord2dT:
     """Translate (move) position by specified 2D vector.
