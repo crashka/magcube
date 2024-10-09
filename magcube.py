@@ -192,7 +192,7 @@ class ModelA(BaseModel):
             yz_pos_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_pos[(y, z)]]
             yz_neg_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_neg[(y, z)]]
             self.model.add(sum(yz_pos_pieces) == 3).only_enforce_if(self.yz_polarity[(y, z)])
-            self.model.add(sum(yz_neg_pieces) == 3).only_enforce_if(~self.yz_polarity[(y, z)])
+            self.model.add(sum(yz_neg_pieces) >= 1).only_enforce_if(~self.yz_polarity[(y, z)])
 
         return self
 
@@ -357,6 +357,7 @@ def main() -> int:
 
     where ``model`` is the designation of the model to use ('A' [default], 'B', 'C', etc.)
     """
+    show_polarity = True
     model_id = 'A'
     if len(sys.argv) > 1:
         model_id = sys.argv[1]
@@ -382,12 +383,12 @@ def main() -> int:
     to_render = []
     print(f"\nSolution (piece: coords):")
     for p_id in solution:
-        blk_coords = [blk_pos for blk_pos, blk_pol in pieces[p_id]]
-        to_render.append(blk_coords)
-        print(f"{p_id:2d}: {blk_coords}")
+        blocks = [block for block in pieces[p_id]]
+        to_render.append(blocks)
+        print(f"{p_id:3d}: {blocks}")
     print("\nRendering in 3D...")
     from render import render
-    render(to_render)
+    render(to_render, show_polarity)
     return 0
 
 if __name__ == "__main__":
