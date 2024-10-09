@@ -27,7 +27,7 @@ PosKeyT  = tuple[CoordT, int]     # int represents piece ID
 COORDS = [(x, y, z) for x in range(3) for y in range(3) for z in range(3)]
 
 # used as the base of a polarity vector
-GRID_COORDS = [(x, y) for x in range(3) for y in range(3)]
+GRID_COORDS = [(c1, c2) for c1 in range(3) for c2 in range(3)]
 
 #############
 # BaseModel #
@@ -121,12 +121,12 @@ class ModelA(BaseModel):
         super().__init__(pieces)
         self.piece_pos = {}
         self.piece_used = None
-        self.xy_pol_pos = {coord: [] for coord in GRID_COORDS}
-        self.xy_pol_neg = {coord: [] for coord in GRID_COORDS}
-        self.xz_pol_pos = {coord: [] for coord in GRID_COORDS}
-        self.xz_pol_neg = {coord: [] for coord in GRID_COORDS}
-        self.yz_pol_pos = {coord: [] for coord in GRID_COORDS}
-        self.yz_pol_neg = {coord: [] for coord in GRID_COORDS}
+        self.xy_pol_pos = {(x, y): [] for (x, y) in GRID_COORDS}
+        self.xy_pol_neg = {(x, y): [] for (x, y) in GRID_COORDS}
+        self.xz_pol_pos = {(x, z): [] for (x, z) in GRID_COORDS}
+        self.xz_pol_neg = {(x, z): [] for (x, z) in GRID_COORDS}
+        self.yz_pol_pos = {(y, z): [] for (y, z) in GRID_COORDS}
+        self.yz_pol_neg = {(y, z): [] for (y, z) in GRID_COORDS}
         # record the list of pieces with positive and negative polarities along each
         # polarity vector
         for p_id, piece in enumerate(self.pieces):
@@ -192,8 +192,9 @@ class ModelA(BaseModel):
             yz_pos_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_pos[(y, z)]]
             yz_neg_pieces = [self.piece_used[p_id] for p_id in self.yz_pol_neg[(y, z)]]
             self.model.add(sum(yz_pos_pieces) == 3).only_enforce_if(self.yz_polarity[(y, z)])
-            self.model.add(sum(yz_neg_pieces) >= 1).only_enforce_if(~self.yz_polarity[(y, z)])
+            self.model.add(sum(yz_neg_pieces) == 3).only_enforce_if(~self.yz_polarity[(y, z)])
 
+        #self.model.add_assumption(self.piece_used[0])
         return self
 
     def solution(self) -> list[int]:
@@ -260,8 +261,6 @@ def build_pieces() -> list:
     indicates directionally negative polarity.
     """
     xy_shapes = []  # list[ShapeT]
-    xz_shapes = []
-    yz_shapes = []
     xy_pieces = []  # list[PieceT]
     xz_pieces = []
     yz_pieces = []
@@ -286,44 +285,28 @@ def build_pieces() -> list:
         for shape in xy_shapes[:REF_SHAPES]:
             xy_shapes.append(tr_shape(shape, vec))
 
-    # xz_shapes and yz_shapes are just copies of xy_shapes (at least in the naive version
-    # of piece generation)
-    for shape in xy_shapes:
-        xz_shapes.append(tuple(sq for sq in shape))
-        yz_shapes.append(tuple(sq for sq in shape))
-
-    # generate pieces from shapes
-    for i in range(3):
+    # generate xy_pieces from shapes
+    for z in range(3):
         # xy_pieces
         for shape in xy_shapes:
-            xy_pieces.append(tuple(((px, py, i), (mx, my, 1))
+            xy_pieces.append(tuple(((px, py, z), (mx, my, 1))
                                    for (px, py), (mx, my) in shape))
 
         # add flipped xy_pieces--flipping along center block diagonal (so "arm" blocks
-        # swap spots), which basically means reversing all of the polarities
+        # swap spots), which actually means just reversing all of the polarities
         for shape in xy_shapes:
-            xy_pieces.append(tuple(((px, py, i), (mx ^ 0x01, my ^ 0x01, 0))
-                                   for (px, py), (mx, my) in shape))
+            xy_pieces.append(tuple(((px, py, z), (mx ^ 0x01, my ^ 0x01, 0))
+                                   for (px, py), (mx, my) in reversed(shape)))
 
-        # xz_pieces
-        for shape in xz_shapes:
-            xz_pieces.append(tuple(((px, i, pz), (mx, 0, mz ^ 0x01))
-                                   for (px, pz), (mx, mz) in shape))
+    # generate xz_pieces from xy_pieces
+    for piece in xy_pieces:
+        xz_pieces.append(tuple(((px, pz, py), (mx, mz ^ 0x01, my))
+                               for (px, py, pz), (mx, my, mz) in piece))
 
-        # flipped xz_pieces
-        for shape in xz_shapes:
-            xz_pieces.append(tuple(((px, i, pz), (mx ^ 0x01, 1, mz))
-                                   for (px, pz), (mx, mz) in shape))
-
-        # yz_pieces
-        for shape in yz_shapes:
-            xz_pieces.append(tuple(((i, py, pz), (1, my, mz ^ 0x01))
-                                   for (py, pz), (my, mz) in shape))
-
-        # flipped yz_pieces
-        for shape in yz_shapes:
-            xz_pieces.append(tuple(((i, py, pz), (0, my ^ 0x01, mz))
-                                   for (py, pz), (my, mz) in shape))
+    # generate yz_pieces from xz_pieces
+    for piece in xz_pieces:
+        yz_pieces.append(tuple(((py, px, pz), (my ^ 0x01, mx, mz))
+                               for (px, py, pz), (mx, my, mz) in piece))
 
     return xy_pieces + xz_pieces + yz_pieces
 
