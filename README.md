@@ -4,28 +4,28 @@
 
 This is my attempt at solving the purple magnetic cube puzzle in my mom's living room
 using CP-SAT.  The puzzle consists of nine identical (I think!) pieces.  Each piece is
-composed of three blocks, arranged in the shape of an L.  Each block face has magnetic
+composed of three blocks, arranged in the shape of an "L".  Each block face has magnetic
 polarity, assumed to be the same for all blocks within a piece (also to be verified!).
 The pieces must be fitted together in a magnetically compatible way to form a 3x3x3 cube.
 
 Thus, the solved puzzle looks like this:
 
 <p align="center">
-  <img src="puzzle.png" alt="CP Stats - CPU"
+  <img src="puzzle.png" alt="Magcube Puzzle"
        style="width: 75%;">
 </p>
 
 Or, slightly exploded:
 
 <p align="center">
-  <img src="exploded.png" alt="CP Stats - CPU"
+  <img src="exploded.png" alt="Magcube Puzzle - Exploded"
        style="width: 75%;">
 </p>
 
 And the individual pieces have magnetic polarity like this:
 
 <p align="center">
-  <img src="piece.png" alt="CP Stats - CPU"
+  <img src="piece.png" alt="Magcube Puzzle Piece"
        style="width: 75%;">
 </p>
 
