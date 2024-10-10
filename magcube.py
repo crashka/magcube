@@ -18,10 +18,10 @@ SquareT  = tuple[Coord2dT, Coord2dT]  # (position, polarity)
 ShapeT   = tuple[SquareT, SquareT, SquareT]
 
 # 3D types
-CoordT   = tuple[int, int, int]   # (x, y, z) coordinates
-BlockT   = tuple[CoordT, CoordT]  # (position, polarity)
+CoordT   = tuple[int, int, int]       # (x, y, z) coordinates
+BlockT   = tuple[CoordT, CoordT]      # (position, polarity)
 PieceT   = tuple[BlockT, BlockT, BlockT]
-PosKeyT  = tuple[CoordT, int]     # int represents piece ID
+PosKeyT  = tuple[CoordT, int]         # int represents piece ID
 
 # all valid coordinates for the puzzle
 COORDS = [(x, y, z) for x in range(3) for y in range(3) for z in range(3)]
@@ -52,7 +52,7 @@ class BaseModel(CpModel):
         """Constructor takes list of pieces as input.
         """
         super().__init__()
-        self.model      = None
+        self.model      = CpModel()
         self.solver     = None
         self.pieces     = pieces
         self.at_coord   = {coord: [] for coord in COORDS}
@@ -152,8 +152,6 @@ class ModelA(BaseModel):
         """Add variables and constraints for the model.  Return ``self``, for method
         chaining.
         """
-        self.model = CpModel()
-
         # Constraint #0 - specify domain for (coord, p_id)
         self.piece_pos = {}
         for coord in COORDS:
@@ -284,15 +282,15 @@ def build_pieces() -> list:
         for shape in xy_shapes[:REF_SHAPES]:
             xy_shapes.append(tr_shape(shape, vec))
 
-    # generate xy_pieces from shapes
+    # generate xy_pieces from xy_shapes
     for z in range(3):
-        # xy_pieces
+        # xy_pieces with positive z-axis polarity
         for shape in xy_shapes:
             xy_pieces.append(tuple(((px, py, z), (mx, my, 1))
                                    for (px, py), (mx, my) in shape))
 
         # add flipped xy_pieces--flipping along center block diagonal (so "arm" blocks
-        # swap spots), which actually means just reversing all of the polarities
+        # swap spots), which in actuality means just reversing all of the polarities
         for shape in xy_shapes:
             xy_pieces.append(tuple(((px, py, z), (mx ^ 0x01, my ^ 0x01, 0))
                                    for (px, py), (mx, my) in reversed(shape)))
