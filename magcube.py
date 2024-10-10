@@ -366,9 +366,10 @@ def main() -> int:
         blocks = [block for block in pieces[p_id]]
         to_render.append(blocks)
         print(f"{p_id:3d}: {blocks}")
-    print("\nRendering in 3D...")
+    print("\nRendering in 3D...", end='')
     from render import render
     render(to_render, show_polarity)
+    print("done")
     return 0
 
 if __name__ == "__main__":

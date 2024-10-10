@@ -63,7 +63,7 @@ area downward to bury, and/or let gravity suppress, the slight bulge), but I hav
 solved it in a satisfactory way.
 
 I am not mathematical enough to analytically determine whether a full solution is possible
-(can someone help here?), so here are a few comments on where things currently stand:
+*\[can someone help here?]*, so here are a few comments on where things currently stand:
 
 1. The puzzle (as I assume the pieces to be, and as have encoded it) may be solvable, but
    I have not been able to find a solution, either physically or using the constraint
@@ -72,7 +72,7 @@ I am not mathematical enough to analytically determine whether a full solution i
 2. If it is solvable, then the constraint solver approach should work, therefore I have a
    bug in either my modeling of the problem, or my coding of it.  It is also possible
    there is a bug in CP-SAT, but that is far less likely.
-   
+
 3. It may also be that I am making some wrong assumptions about the pieces themselves
    (since I don't have access to the physical puzzle right now).  Either the magnetic
    polarities are different than I have assumed, or not all of the pieces are identical
@@ -81,20 +81,16 @@ I am not mathematical enough to analytically determine whether a full solution i
 
 ## To Do
 
-1. Validate the puzzle pieces.
-
-2. Find and fix modeling and/or coding problems (if any).
-
-3. Convert the CP feasibility problem into an optimization problem, where the objective is
-   to minimize the number of mismatched polarities between block faces.
+- Validate the puzzle pieces.
+- Find and fix modeling and/or coding problems (if any).
+- Convert the CP feasibility problem into an optimization problem, where the objective is
+  to minimize the number of mismatched polarities between block faces.
 
 ## Acknowledgments
 
 I want to recognize the following resources for their utility in this mini-project:
 
-1. Google's [CP-SAT Solver](https://developers.google.com/optimization/cp/cp_solver)
-
-2. Dominik Krupke's excellent [CP-SAT Primer](https://github.com/d-krupke/cpsat-primer)
-
-3. The [VPython](https://glowscript.org/docs/VPythonDocs/index.html) library from Bruce
-   Sherwood and David Scherer (and others), for the cool rendering capabilities
+- Google's [CP-SAT](https://developers.google.com/optimization/cp/cp_solver) solver
+- Dominik Krupke's excellent [CP-SAT Primer](https://github.com/d-krupke/cpsat-primer)
+- The [VPython](https://glowscript.org/docs/VPythonDocs/index.html) library from Bruce
+  Sherwood and David Scherer (and others), for its cool rendering capabilities

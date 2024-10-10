@@ -104,8 +104,11 @@ def render(solution: list[PieceT], show_polarity: bool = False) -> None:
 
     while (running):
         rate(30)
-    stop_server()  # issues a sys.exit() somewhere in its bowels (yuk!)
-    assert False, "NOTREACHED"
+    try:
+        stop_server()  # issues a sys.exit() somewhere in its bowels (yuk!)
+    except SystemExit as e:
+        if e.code != 0:
+            raise
 
 ########
 # main #
