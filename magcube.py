@@ -125,18 +125,15 @@ class BaseModel(CpModel):
         print(f"- Wall time : {self.solver.wall_time:.2f} secs", file=sys.stderr)
 
 ##########
-# ModelA #
+# Model0 #
 ##########
 
-class ModelA(BaseModel):
-    """Constraints based on propositional logic and reification (``add_bool_and()`` and
-    ``only_enforce_if()``).
+class Model0(BaseModel):
+    """Simplified (incomplete) model containing only positional constraints.  This is used
+    as the basis for various approaches to modeling the magnetics constraints.
     """
     piece_pos:   dict[PosKeyT, IntVar]
     piece_used:  list[IntVar]  # indexed by piece ID
-    xy_polarity: dict[Coord2dT, IntVar]
-    xz_polarity: dict[Coord2dT, IntVar]
-    yz_polarity: dict[Coord2dT, IntVar]
 
     def __init__(self, pieces: list[PieceT]):
         """Constructor takes list of pieces as input.
@@ -144,9 +141,6 @@ class ModelA(BaseModel):
         super().__init__(pieces)
         self.piece_pos   = None
         self.piece_used  = None
-        self.xy_polarity = None
-        self.xz_polarity = None
-        self.yz_polarity = None
 
     def build(self) -> Self:
         """Add variables and constraints for the model.  Return ``self``, for method
@@ -158,12 +152,12 @@ class ModelA(BaseModel):
             for p_id in range(self.npieces):
                 self.piece_pos[coord, p_id] = self.model.new_bool_var(f'pos_{coord}_{p_id}')
 
-        # Constraint #1 - specify variables for piece usage, and create associated
-        # constraits for component blocks
+        # Constraint #1 - specify boolean variables for piece usage, and associated
+        # all-or-none constraints (reified) for each piece's component blocks
         self.piece_used = [self.model.new_bool_var(f'used_{p_id}') for p_id in range(self.npieces)]
         for p_id, piece in enumerate(self.pieces):
-            all_blocks = [self.piece_pos[blk_pos, p_id] for blk_pos, blk_pol in piece]
-            no_blocks = [~self.piece_pos[blk_pos, p_id] for blk_pos, blk_pol in piece]
+            all_blocks = [self.piece_pos[blk_pos, p_id] for blk_pos, _ in piece]
+            no_blocks = [~self.piece_pos[blk_pos, p_id] for blk_pos, _ in piece]
             self.model.add_bool_and(all_blocks).only_enforce_if(self.piece_used[p_id])
             self.model.add_bool_and(no_blocks).only_enforce_if(~self.piece_used[p_id])
 
@@ -171,6 +165,39 @@ class ModelA(BaseModel):
         for coord in COORDS:
             coord_pieces = (self.piece_pos[coord, p_id] for p_id in self.at_coord[coord])
             self.model.add(sum(coord_pieces) == 1)
+
+        return self
+
+    def solution(self) -> list[int]:
+        """Return list of pieces for the solution.
+        """
+        return [p_id for p_id in range(self.npieces) if self.solver.value(self.piece_used[p_id])]
+
+##########
+# ModelA #
+##########
+
+class ModelA(Model0):
+    """Initial implementation for modeling magnetics constraints.
+    """
+    xy_polarity: dict[Coord2dT, IntVar]
+    xz_polarity: dict[Coord2dT, IntVar]
+    yz_polarity: dict[Coord2dT, IntVar]
+
+    def __init__(self, pieces: list[PieceT]):
+        """Constructor takes list of pieces as input.
+        """
+        super().__init__(pieces)
+        self.xy_polarity = None
+        self.xz_polarity = None
+        self.yz_polarity = None
+
+    def build(self) -> Self:
+        """Add variables and constraints for the model.  Return ``self``, for method
+        chaining.
+        """
+        # parent builds the positional and `piece_used` constraints
+        super().build()
 
         # Constraint #3 - specify variables for all polarity vectors, and ensure that all
         # pieces are aligned on vectors
@@ -199,11 +226,6 @@ class ModelA(BaseModel):
 
         #self.model.add_assumption(self.piece_used[0])
         return self
-
-    def solution(self) -> list[int]:
-        """Return list of pieces for the solution.
-        """
-        return [p_id for p_id in range(self.npieces) if self.solver.value(self.piece_used[p_id])]
 
 ################
 # build_pieces #

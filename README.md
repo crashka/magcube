@@ -68,11 +68,9 @@ I am not mathematical enough to analytically determine whether a full solution i
 1. The puzzle (as I assume the pieces to be, and as have encoded it) may be solvable, but
    I have not been able to find a solution, either physically or using the constraint
    solver model.
-
 2. If it is solvable, then the constraint solver approach should work, therefore I have a
-   bug in either my modeling of the problem, or my coding of it.  It is also possible
-   there is a bug in CP-SAT, but that is far less likely.
-
+   bug in either my modeling of the problem, or my coding of it.  It is also remotely
+   possible there is a bug in CP-SAT, but I am assuming that is not the case here.
 3. It may also be that I am making some wrong assumptions about the pieces themselves
    (since I don't have access to the physical puzzle right now).  Either the magnetic
    polarities are different than I have assumed, or not all of the pieces are identical
